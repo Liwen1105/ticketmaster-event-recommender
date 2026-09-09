@@ -1,0 +1,214 @@
+/* ───────────────────────── scripts/main.js ───────────────────────── */
+/* eslint-env browser */
+(() => {
+  'use strict';
+
+  /* ---------- DOM Shortcuts ---------- */
+  const $ = (id) => document.getElementById(id);
+
+  // Forms & inputs
+  const loginForm     = $('login-form');
+  const registerForm  = $('register-form');
+  const loginError    = $('login-error');
+  const registerMsg   = $('register-result');
+
+  const loginU        = $('username');
+  const loginP        = $('password');
+
+  const regU          = $('register-username');
+  const regP          = $('register-password');
+  const regF          = $('register-first-name');
+  const regL          = $('register-last-name');
+
+  // Nav & misc
+  const welcomeMsg    = $('welcome-msg');
+  const logoutLink    = $('logout-link');
+  const navBtns       = {
+    nearby:    $('nearby-btn'),
+    fav:       $('fav-btn'),
+    recommend: $('recommend-btn')
+  };
+  const eventList     = $('event-list');
+
+  /* ---------- Constants ---------- */
+  const LS_USERS   = 'er_users';       // all registered users
+  const SS_SESSION = 'er_session';     // current login
+  const LS_CACHE   = 'er_cache';       // event cache
+
+  /* ---------- Small helpers ---------- */
+  const hide  = (el) => (el.style.display = 'none');
+  const show  = (el) => (el.style.display = '');
+  const getUsers = () => JSON.parse(localStorage.getItem(LS_USERS) || '{}');
+  const putUsers = (obj) => localStorage.setItem(LS_USERS, JSON.stringify(obj));
+  const getSes   = () => JSON.parse(sessionStorage.getItem(SS_SESSION) || 'null');
+  const setSes   = (userObj) => sessionStorage.setItem(SS_SESSION, JSON.stringify(userObj));
+  const clearSes = () => sessionStorage.removeItem(SS_SESSION);
+
+  const activeNav = (key) => {
+    Object.entries(navBtns).forEach(([k, btn]) => {
+      btn.classList.toggle('active', k === key);
+    });
+  };
+
+  /* ---------- Auth logic ---------- */
+  $('register-form-btn').onclick = () => { hide(loginForm); show(registerForm); };
+  $('login-form-btn').onclick    = () => { show(loginForm); hide(registerForm); };
+
+  $('register-btn').onclick = (e) => {
+    e.preventDefault();
+    // simple validation
+    if (![regU, regP, regF, regL].every(i => i.value.trim())) {
+      registerMsg.textContent = 'Please fill out every field marked *';
+      return;
+    }
+    const users = getUsers();
+    if (users[regU.value]) {
+      registerMsg.textContent = '❌ Username already taken.';
+      return;
+    }
+    // create user
+    users[regU.value] = {
+      username:  regU.value,
+      password:  md5(regP.value),  // hash for demo purposes
+      firstName: regF.value.trim(),
+      lastName:  regL.value.trim(),
+      favourites:{}
+    };
+    putUsers(users);
+    registerMsg.textContent = '✅ Registered! Now log in.';
+    setTimeout(() => { registerMsg.textContent=''; $('login-form-btn').click(); }, 1200);
+  };
+
+  $('login-btn').onclick = (e) => {
+    e.preventDefault();
+    const users = getUsers();
+    const u = users[loginU.value];
+    if (!u || u.password !== md5(loginP.value)) {
+      loginError.textContent = 'Invalid username / password';
+      return;
+    }
+    loginError.textContent = '';
+    setSes(u);
+    initApp();
+  };
+
+  logoutLink.onclick = (e) => {
+    e.preventDefault();
+    clearSes();
+    clearUI();
+  };
+
+  /* ---------- Event rendering ---------- */
+  function renderEvents(events) {
+    eventList.innerHTML = '';                       // purge list
+    events.forEach(evt => {
+      const li = document.createElement('li');
+      li.className = 'event';
+      li.innerHTML = `
+        <img src="${evt.imageUrl}" alt="${evt.name}" />
+        <div>
+          <a href="${evt.url ?? '#'}" target="_blank" class="event-name">${evt.name}</a>
+          <p class="event-category">${evt.category}</p>
+          <div class="stars">${'★'.repeat(evt.rating)}${'☆'.repeat(5 - evt.rating)}</div>
+        </div>
+        <p class="event-address">${evt.address.replace(',', '<br/>')}</p>
+        <div class="fav-link">
+          <i class="fa fa-heart${evt.favourite ? '' : '-o'}"></i>
+        </div>`;
+      // Heart toggle
+      li.querySelector('.fav-link').onclick = () => {
+        evt.favourite = !evt.favourite;
+        li.querySelector('.fa').className = `fa fa-heart${evt.favourite ? '' : '-o'}`;
+        saveFavourite(evt);
+      };
+      eventList.appendChild(li);
+    });
+  }
+
+  /* ---------- Data layer ---------- */
+  async function fetchEvents(endpoint, cacheKey) {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached) renderEvents(cached);               // paint cached first (kills the flash)
+
+    try {
+      const res  = await fetch(endpoint);
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      renderEvents(data);
+      localStorage.setItem(cacheKey, JSON.stringify(data));  // update cache
+    } catch (err) {
+      console.warn(`Fetch failed (${endpoint}) →`, err);
+      if (!cached) renderEvents(sampleEvents());             // fail‑safe
+    }
+  }
+
+  // Dummy data if API unreachable
+  const sampleEvents = () => [{
+    name: 'Taylor Swift Live House',
+    category: 'Live Band',
+    rating: 5,
+    imageUrl: 'https://s1.ticketm.net/dam/a/560/121b08a3-5cc6-447b-9715-ce9d99f76560_RETINA_PORTRAIT_3_2.jpg',
+    address: 'Moody Theater, Austin TX',
+    favourite: false
+  }];
+
+  /* ---------- Favourites ---------- */
+  function saveFavourite(evt) {
+    const user = getSes();
+    if (!user) return;                       // nobody logged in
+    const users = getUsers();
+    users[user.username].favourites = users[user.username].favourites || {};
+    users[user.username].favourites[evt.name] = evt;
+    putUsers(users);
+  }
+
+  /* ---------- Nav handlers ---------- */
+  navBtns.nearby.onclick = (e) => {
+    e.preventDefault();
+    activeNav('nearby');
+    fetchEvents('/events/nearby', `${LS_CACHE}_nearby`);
+  };
+  navBtns.fav.onclick = (e) => {
+    e.preventDefault();
+    activeNav('fav');
+    const user = getSes();
+    if (!user) return;
+    const users = getUsers();
+    renderEvents(Object.values(users[user.username].favourites || {}));
+  };
+  navBtns.recommend.onclick = (e) => {
+    e.preventDefault();
+    activeNav('recommend');
+    fetchEvents('/events/recommend', `${LS_CACHE}_recommend`);
+  };
+
+  /* ---------- UI state switchers ---------- */
+  function initApp() {
+    // Hide auth forms, show welcome + nav
+    hide(loginForm);
+    hide(registerForm);
+    show(eventList.parentElement);    // main‑section is flex
+    const user = getSes();
+    welcomeMsg.textContent = `Welcome, ${user.firstName}!`;
+    show(logoutLink);
+
+    // Default load
+    activeNav('nearby');
+    navBtns.nearby.click();
+  }
+
+  function clearUI() {
+    // Back to login page
+    welcomeMsg.textContent = '';
+    hide(logoutLink);
+    show(loginForm);
+    hide(registerForm);
+    eventList.innerHTML = '';
+  }
+
+  /* ---------- Bootstrap ---------- */
+  document.addEventListener('DOMContentLoaded', () => {
+    hide(registerForm);               // start with login view
+    if (getSes()) initApp();
+  });
+})();
