@@ -200,7 +200,3 @@ For a production deployment:
 ## Acknowledgment
 
 Event information is provided through the Ticketmaster Discovery API. Ticketmaster trademarks and data belong to their respective owners.
-
-## Disclaimer
-
-This project was created for educational and portfolio purposes. Do not upload course lesson documents, API keys, passwords, private keys, or other restricted materials to this public repository.
